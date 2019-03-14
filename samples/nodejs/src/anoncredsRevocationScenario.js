@@ -60,7 +60,7 @@ async function closeAndDeleteWallet(wallet, actor) {
 
 async function createAndOpenPoolHandle(actor) {
     const poolName = actor + "-pool-sandbox"
-    const poolGenesisTxnPath = await util.getPoolGenesisTxnPath(poolName)
+    const poolGenesisTxnPath = "/home/indy/sandbox/pool_transactions_genesis";//await util.getPoolGenesisTxnPath(poolName)
     const poolConfig = {"genesis_txn": poolGenesisTxnPath}
     await indy.createPoolLedgerConfig(poolName, poolConfig)
         .catch(e => {
@@ -245,9 +245,14 @@ async function run() {
     }
 
     logIssuer("Issuer creates revocation registry")
+
+    function randomTagNumer() {
+        return Math.floor(Math.random() * Math.floor(Number.MAX_SAFE_INTEGER));
+    }
+
     {
         const [revRegDefId, revRegDef, revRegEntry] = await indy.issuerCreateAndStoreRevocReg(issuer.wallet, issuer.did,
-                                                    undefined, "tag1", issuer.credDefId,
+                                                    undefined, "tag"+randomTagNumer(), issuer.credDefId,
                                                     {"max_cred_num": 5, "issuance_type": "ISSUANCE_ON_DEMAND"},
                                                     issuer.tailsWriter)
         issuer.revRegDefId = revRegDefId
@@ -272,6 +277,22 @@ async function run() {
     logVerifier("Verifier gets schema from ledger")
     verifier.schema = await getSchemaFromLedger(verifier.poolHandle, verifier.did, verifier.schemaId)
 
+
+    logProver("Prover creates master secret")
+    prover.masterSecretId = await indy.proverCreateMasterSecret(prover.wallet, undefined)
+
+    logIssuer("Issuer open Tails reader")
+    {
+        const tailsReaderConfig = {"base_dir": util.getPathToIndyClientHome() + "/tails", "uri_pattern": ""}
+        issuer.blobStorageReaderHandle = await indy.openBlobStorageReader("default", tailsReaderConfig)
+    }
+
+
+
+    // Début offre --> credential
+
+
+
     logIssuer("Issuer creates credential offer")
     issuer.credOffer = await indy.issuerCreateCredentialOffer(issuer.wallet, issuer.credDefId)
 
@@ -280,10 +301,10 @@ async function run() {
 
     logProver("Prover gets credential definition from ledger")
     prover.credDefId = prover.credOffer["cred_def_id"]
+    log()
+    log("prover.credDefId=",prover.credDefId)
+    log()
     prover.credDef = await getCredDefFromLedger(prover.poolHandle, prover.did, prover.credDefId)
-
-    logProver("Prover creates master secret")
-    prover.masterSecretId = await indy.proverCreateMasterSecret(prover.wallet, undefined)
 
     logProver("Prover creates credential request")
     {
@@ -295,12 +316,6 @@ async function run() {
 
     log("Transfer credential request from 'Prover' to 'Issuer' (via HTTP or other) ...")
     issuer.credReq = prover.credReq
-
-    logIssuer("Issuer open Tails reader")
-    {
-        const tailsReaderConfig = {"base_dir": util.getPathToIndyClientHome() + "/tails", "uri_pattern": ""}
-        issuer.blobStorageReaderHandle = await indy.openBlobStorageReader("default", tailsReaderConfig)
-    }
 
     logIssuer("Issuer creates credential")
     {
@@ -314,7 +329,11 @@ async function run() {
                                 issuer.credReq, credValues, issuer.revRegDefId, issuer.blobStorageReaderHandle)
         issuer.cred = cred
         issuer.credRevId = credRevId
+        log()
+        log("issuer.credRevId=",issuer.credRevId)
+        log()
         issuer.revRegDelta = revRegDelta
+        log("issuer.revRegDelta=",issuer.revRegDelta)
     }
 
     logIssuer("Issuer posts revocation registry delta to ledger (#1)")
@@ -324,8 +343,80 @@ async function run() {
     prover.cred = issuer.cred
     issuer.cred = undefined
 
+
+
+    // Fin création credential
+
+
+    // Début offre --> credential 2
+
+
+
+    logIssuer("Issuer creates credential offer")
+    issuer.credOffer2 = await indy.issuerCreateCredentialOffer(issuer.wallet, issuer.credDefId)
+
+    log("Transfer offer from 'Issuer' to 'Prover' (via HTTP or other) ...")
+    prover.credOffer2 = issuer.credOffer2
+
+    logProver("Prover gets credential definition from ledger")
+    prover.credDefId2 = prover.credOffer2["cred_def_id"]
+    log()
+    log("prover.credDefId2=",prover.credDefId2)
+    log()
+    prover.credDef2 = await getCredDefFromLedger(prover.poolHandle, prover.did, prover.credDefId2)
+
+    logProver("Prover creates credential request")
+    {
+        const [credReq, credReqMetadata] = await indy.proverCreateCredentialReq(prover.wallet, prover.did,
+                                                                prover.credOffer2, prover.credDef, prover.masterSecretId)
+        prover.credReq2 = credReq
+        prover.credReqMetadata2 = credReqMetadata
+    }
+
+    log("Transfer credential request from 'Prover' to 'Issuer' (via HTTP or other) ...")
+    issuer.credReq2 = prover.credReq2
+
+    logIssuer("Issuer creates credential")
+    {
+        const credValues = {
+            "sex": {"raw": "male", "encoded": "5944657099558967239210949258394887428692050081607692519917050"},
+            "name": {"raw": "Alex", "encoded": "1139481716457488690172217916278103335"},
+            "height": {"raw": "175", "encoded": "175"},
+            "age": {"raw": "28", "encoded": "28"}
+        }
+        const [cred, credRevId, revRegDelta] = await indy.issuerCreateCredential(issuer.wallet, issuer.credOffer2,
+                                issuer.credReq2, credValues, issuer.revRegDefId, issuer.blobStorageReaderHandle)
+        issuer.cred2 = cred
+        issuer.credRevId2 = credRevId
+        log()
+        log("issuer.credRevId2=",issuer.credRevId2)
+        log()
+        issuer.revRegDelta2 = revRegDelta
+        log("issuer.revRegDelta2=",issuer.revRegDelta2)
+    }
+
+    logIssuer("Issuer posts revocation registry delta to ledger (#1)")
+    await postRevocRegEntryRequestToLedger(issuer.poolHandle, issuer.wallet, issuer.did, issuer.revRegDefId, issuer.revRegDelta2)
+
+    log("Transfer credential from 'Issuer' to 'Prover' (via HTTP or other) ...")
+    prover.cred2 = issuer.cred2
+    issuer.cred2 = undefined
+
+
+    log()
+    log("prover.cred=",prover.cred)
+    log("prover.cred2=",prover.cred2)
+    log()
+
+    // Fin création credential 2
+
+
+
     logProver("Prover gets revocation registry definition from ledger")
     prover.revRegDefId = prover.cred["rev_reg_id"]
+    log()
+    log("prover.revRegDefId=",prover.revRegDefId)
+    log()
     prover.revRegDef = await getRevocRegDefFromLedger(prover.poolHandle, prover.did, prover.revRegDefId)
 
     logProver("Prover stores credential")
@@ -379,6 +470,7 @@ async function run() {
     {
         const [revRegDelta, timestamp] = await getRevocRegDeltaFromLedger(prover.poolHandle, prover.did, prover.revRegDefId, 0 /* from */, util.getCurrentTimeInSeconds() /* to */)
         prover.revRegDelta = revRegDelta
+        log("prover.revRegDelta=",prover.revRegDelta)
         prover.timestampOfDelta = timestamp // = timestamp of "Issuer Posts Revocation Registry Delta to ledger (#1)"
     }
 
@@ -449,14 +541,41 @@ async function run() {
     log("Pause....")
     await util.sleep(3000)
 
+
+
+    //__________ REVOC _______________________________
+
+
+
+
     logIssuer("Issuer revokes credential")
+    log()
+    log("issuer.revRegDefId=",issuer.revRegDefId)
+    log("issuer.credRevId=",issuer.credRevId)
+    log()
     issuer.revRegDeltaAfterRevocation = await indy.issuerRevokeCredential(issuer.wallet, issuer.blobStorageReaderHandle, issuer.revRegDefId, issuer.credRevId)
+    log("issuer.revRegDeltaAfterRevocation=",issuer.revRegDeltaAfterRevocation)
 
     log("Pause....")
     await util.sleep(3000)
 
+    logProver("A) Verify cred revoc ?????")
+    {
+        const [revRegDelta, timestamp] = await getRevocRegDeltaFromLedger(prover.poolHandle, prover.did, prover.revRegDefId, 0 /* from */, util.getCurrentTimeInSeconds() /* to */)
+        log("revRegDelta=",revRegDelta)
+    }
+
     logIssuer("Issuer posts revocation registry delta to ledger (#2 after revocation)")
     await postRevocRegEntryRequestToLedger(issuer.poolHandle, issuer.wallet, issuer.did, issuer.revRegDefId, issuer.revRegDeltaAfterRevocation)
+
+    log("Pause....")
+    await util.sleep(3000)
+
+    logProver("B) Verify cred revoc ?????")
+    {
+        const [revRegDelta, timestamp] = await getRevocRegDeltaFromLedger(prover.poolHandle, prover.did, prover.revRegDefId, 0 /* from */, util.getCurrentTimeInSeconds() /* to */)
+        log("revRegDelta=",revRegDelta)
+    }
 
     logVerifier("Verifier gets revocation registry delta from ledger")
     {
@@ -478,6 +597,10 @@ async function run() {
     logVerifier("Verifier gets revocation registry delta from ledger")
     {
         const [revRegValue, /* timestamp (unused) */] = await getRevocRegFromLedger(verifier.poolHandle, verifier.did, verifier.revRegDefId, verifier.timestampReceptionOfProof /* to */)
+        log()
+        log("verifier.revRegDefId=",verifier.revRegDefId)
+        log("revRegValue=",revRegValue)
+        log()
         verifier.revRegValue3 = revRegValue
     }
 
@@ -503,6 +626,9 @@ async function run() {
 }
 
 if (require.main.filename == __filename) {
+    log()
+    log("RUN !")
+    log()
     run()
 }
 
